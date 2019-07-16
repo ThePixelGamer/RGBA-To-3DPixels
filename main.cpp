@@ -11,10 +11,14 @@
 #include <iomanip>
 #include <iterator>
 
+#define cimg_use_png
+#include "CImg.h"
+using namespace cimg_library;
+#include "png.h"
+
 using std::cout, std::cin, std::flush, std::ifstream, std::ofstream;
 
-std::vector<unsigned int> split(const std::string& s, char delimiter)
-{
+std::vector<unsigned int> split(const std::string& s, char delimiter) {
   std::vector<unsigned int> tokens;
   std::string token;
   std::istringstream tokenStream(s);
@@ -30,74 +34,49 @@ std::vector<unsigned int> split(const std::string& s, char delimiter)
   return tokens;
 }
 
-int main()
-{
-  std::srand(time(NULL));
-  int width;
-
-  cout << "Enter desired line width: ";
-  cin >> width;
-
-  std::string owo;
-  ifstream pixels("picture.rgba");
-  pixels >> owo;
-  std::vector<unsigned int> cubes = split(owo, ',');
+void RGBAtoOBJ(const char* location) {
+  CImg<uint8_t> image(location);
+  cout << "Width: " << image.width() << std::endl;
+  cout << "Height: " << image.height() << std::endl;
 
   std::string objname;
-  cout << "Enter desired name: ";
+  cout << "Enter name output: ";
   cin >> objname;
-
-  std::set<unsigned int> mtl(cubes.begin(), cubes.end());
-  std::copy(cubes.begin(), cubes.end(), std::inserter(mtl, mtl.end()));
 
   CreateDirectoryA(objname.c_str(), NULL); //fun windows bs :D
   std::string filepath = "./" + objname + "/" + objname;
-  ofstream material(filepath + ".mtl");
-  for(int i = 0; i < mtl.size(); i++) {
-    auto pos = mtl.begin();
-    std::advance(pos, i);
-    if((*pos & 0xff) != 0) {
-      double R = (double)((*pos >> 24) & 0xff) / 255;
-      double G = (double)((*pos >> 16) & 0xff) / 255;
-      double B = (double)((*pos >> 8)  & 0xff) / 255;
-      material << "newmtl " << std::setfill('0') << std::setw(8) << std::hex << *pos << "\n  illum 0\n  Kd " << std::dec << std::setprecision(15) << R << " " << G << " " << B << "\n";
-    }
-  }
+
+  //handle obj
   ofstream object(filepath + ".obj");
   object << "mtllib " << objname << ".mtl\no " << objname << "\n\nvt 0.0 0.0\nvt 1.0 0.0\nvt 0.0 1.0\nvt 1.0 1.0\n\nvn  0.0  0.0  1.0\nvn  0.0  0.0 -1.0\nvn  0.0  1.0  0.0\nvn  0.0 -1.0  0.0\nvn  1.0  0.0  0.0\nvn -1.0  0.0  0.0\n";
 
-  object << "\n#Generated based on user's input: ";
-  for(int i = 0; i < cubes.size(); i++) {
-    object << cubes[i] << " ";
-  }
-  object << "\n";
-
   object << "\n#front\n";
-
-  for(int h = 0, max_h = (cubes.size() + 1); h < max_h; h++) {
-    for(int w = 0, max_w = (width + 1); w < max_w; w++) {
+  for(int h = 0, max_h = (image.height() + 1); h < max_h; h++) {
+    for(int w = 0, max_w = (image.width() + 1); w < max_w; w++) {
       object << "v " << w << " " << h << " " << "1\n";
     }
   }
 
   object << "\n#back\n";
-
-  for(int h = 0, max_h = (cubes.size() + 1); h < max_h; h++) {
-    for(int w = 0, max_w = (width + 1); w < max_w; w++) {
+  for(int h = 0, max_h = (image.height() + 1); h < max_h; h++) {
+    for(int w = 0, max_w = (image.width() + 1); w < max_w; w++) {
       object << "v " << w << " " << h << " " << "0\n";
     }
   }
 
-  int back = (1 + width) * (1 + cubes.size());
-  for(int i = 0; i < cubes.size(); i++) {
-    if(cubes[i] == 0) continue;
+  int back = (1 + image.width()) * (1 + image.height());
+  std::set<uint32_t> mtl;
+  for(uint32_t i = 0, max = image.width() * image.height(); i < max; i++) {
+    if(image(i%image.width(), i/image.width(), 3) == 0) continue;
 
-    object << "\ng " << "cube" << i << "\nusemtl " << std::setfill('0') << std::setw(8) << std::hex << cubes[i] << std::dec << "\n";
+    uint32_t pixel = (image(i%image.width(), i/image.width(), 0) << 24) + (image(i%image.width(), i/image.width(), 1) << 16) + (image(i%image.width(), i/image.width(), 2) << 8) + image(i%image.width(), i/image.width(), 3);
+    mtl.insert(pixel);
+    object << "\ng " << "cube" << i << "\nusemtl " << std::setfill('0') << std::setw(8) << std::hex << pixel << std::dec << "\n";
 
     //left and right is based on you looking toward the face
-    int front_bottom_left  = i + 1 + (i/width);
+    int front_bottom_left  = (i%image.width()) + 1 + ((image.height() - (i/image.width()) - 1) * (image.width()+1));
     int front_bottom_right = front_bottom_left + 1;
-    int front_top_left     = front_bottom_left + width + 1;
+    int front_top_left     = front_bottom_left + image.width() + 1;
     int front_top_right    = front_top_left + 1;
     int back_bottom_right  = front_bottom_left + back;
     int back_bottom_left   = front_bottom_right + back;
@@ -125,11 +104,36 @@ int main()
     object << "f " << front_top_left     << "/1/5 " << back_top_right     << "/3/5 " << back_top_left      << "/4/5\n";
  
     //back 
-    object << "f " << back_bottom_right  << "/1/5 " << front_bottom_right << "/4/5 " << back_bottom_left   << "/2/5\n";
-    object << "f " << back_bottom_right  << "/1/5 " << front_bottom_left  << "/3/5 " << front_bottom_right << "/4/5\n";
-    
-    }
+    object << "f " << back_bottom_right  << "/1/6 " << front_bottom_right << "/4/6 " << back_bottom_left   << "/2/6\n";
+    object << "f " << back_bottom_right  << "/1/6 " << front_bottom_left  << "/3/6 " << front_bottom_right << "/4/6\n";
+  }
 
+  ofstream material(filepath + ".mtl");
+  for(int i = 0; i < mtl.size(); i++) {
+    auto pos = mtl.begin();
+    std::advance(pos, i);
+    if((*pos & 0xff) != 0) {
+      double R = (double)((*pos >> 24) & 0xff) / 255;
+      double G = (double)((*pos >> 16) & 0xff) / 255;
+      double B = (double)((*pos >> 8)  & 0xff) / 255;
+      material << "newmtl " << std::setfill('0') << std::setw(8) << std::hex << *pos << "\n  illum 0\n  Kd " << std::dec << std::setprecision(15) << R << " " << G << " " << B << "\n";
+    }
+  }
+  
+  material.close();
   object.close();
-  return 0;
+}
+
+int main(int argc, char *argv[]) {
+  std::string location;
+  if(argc > 1) {
+    location = argv[1];
+  }
+  else {
+    cout << "Enter PNG you want to use: ";
+    std::getline(cin, location, '\n');
+  }
+  RGBAtoOBJ(location.c_str());
+
+  std::getchar();
 }
